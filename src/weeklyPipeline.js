@@ -149,6 +149,7 @@ export async function runWeeklyLeague({
 
   for (const weekStartValue of weeksToProcess) {
     try {
+      logger.info(`[league] processing week ${weekStartValue}`);
       const weekDate = toUtcDate(weekStartValue);
       if (!weekDate) {
         throw new Error(`Invalid week start date: ${weekStartValue}`);
@@ -167,15 +168,19 @@ export async function runWeeklyLeague({
       const scoresForWeek = scoresByWeek.get(weekStartValue) ?? [];
 
       await db.runInTransaction(async () => {
+        // Metrics are computed per week already; persist the scoped slice as-is.
         await db.upsertWeeklyMetrics({ weekId: week.id, metrics: metricsForWeek, timestamp });
         await db.upsertWeeklyScores({ weekId: week.id, scores: scoresForWeek, timestamp });
       });
 
       if (!aiClient) {
-        throw new Error('AI client missing; cannot generate commentary.');
+        logger.warn(`[league] AI client missing; skipping commentary for ${weekStartValue}`);
+        results.push({ weekStart: weekStartValue, weekId: week.id, label: weekLabel });
+        continue;
       }
 
       const athleteSummaries = buildAthleteSummaries({
+        // Scores/metrics are already scoped per week by the grouping step above.
         scores: scoresForWeek,
         metrics: metricsForWeek,
         athletes,
