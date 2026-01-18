@@ -13,7 +13,7 @@ function initMetrics(weekStart) {
     weekStart,
     acuteLoad: 0,
     chronicLoad: 0,
-    formLoad: 0,
+    form: 0,
     acuteSwim: 0,
     chronicSwim: 0,
     formSwim: 0,
@@ -26,26 +26,58 @@ function initMetrics(weekStart) {
   };
 }
 
-function computeRollingAverage(points, endDate, windowDays, field) {
-  const windowStart = new Date(endDate);
-  windowStart.setUTCDate(windowStart.getUTCDate() - (windowDays - 1));
-
-  const values = points
-    .filter((point) => point.date >= windowStart && point.date <= endDate)
-    .map((point) => point[field]);
-
-  if (values.length === 0) {
-    return 0;
-  }
-
-  const sum = values.reduce((total, value) => total + value, 0);
-  return sum / values.length;
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
 }
 
-export function computeWeeklyMetrics(
-  weeklyLoads,
-  { acuteDays = 7, chronicDays = 28 } = {}
-) {
+function addWeeks(date, weeks) {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + weeks * 7);
+  return next;
+}
+
+function createWeeklySeries(loads) {
+  if (loads.length === 0) {
+    return [];
+  }
+
+  const sorted = [...loads].sort((a, b) => a.date - b.date);
+  const start = sorted[0].date;
+  const end = sorted[sorted.length - 1].date;
+  const byWeek = new Map(sorted.map((entry) => [entry.weekStart, entry]));
+
+  const series = [];
+  for (let cursor = start; cursor <= end; cursor = addWeeks(cursor, 1)) {
+    const weekStart = cursor.toISOString().slice(0, 10);
+    const entry = byWeek.get(weekStart);
+
+    series.push({
+      weekStart,
+      totalLoad: entry?.totalLoad ?? 0,
+      swimLoad: entry?.swimLoad ?? 0,
+      bikeLoad: entry?.bikeLoad ?? 0,
+      runLoad: entry?.runLoad ?? 0,
+    });
+  }
+
+  return series;
+}
+
+function computeWindowAverage(series, index, windowSize, field) {
+  let sum = 0;
+  // Index-based window with missing weeks treated as zero.
+  for (let offset = 0; offset < windowSize; offset += 1) {
+    const position = index - offset;
+    if (position >= 0) {
+      sum += series[position][field];
+    }
+  }
+
+  // Always divide by full window size for gamification consistency.
+  return sum / windowSize;
+}
+
+export function computeWeeklyMetrics(weeklyLoads) {
   const loadsByAthlete = new Map();
 
   for (const load of weeklyLoads) {
@@ -61,6 +93,7 @@ export function computeWeeklyMetrics(
     const entry = {
       athleteId: load.athleteId,
       date,
+      weekStart: date.toISOString().slice(0, 10),
       totalLoad: load.totalLoad ?? 0,
       swimLoad: load.swimLoad ?? 0,
       bikeLoad: load.bikeLoad ?? 0,
@@ -77,28 +110,28 @@ export function computeWeeklyMetrics(
   const metrics = [];
 
   for (const [athleteId, loads] of loadsByAthlete.entries()) {
-    loads.sort((a, b) => a.date - b.date);
+    const series = createWeeklySeries(loads);
 
-    for (const point of loads) {
-      const weekStart = point.date.toISOString().slice(0, 10);
-      const metric = initMetrics(weekStart);
+    for (let index = 0; index < series.length; index += 1) {
+      const point = series[index];
+      const metric = initMetrics(point.weekStart);
       metric.athleteId = athleteId;
 
-      metric.acuteLoad = computeRollingAverage(loads, point.date, acuteDays, 'totalLoad');
-      metric.chronicLoad = computeRollingAverage(loads, point.date, chronicDays, 'totalLoad');
-      metric.formLoad = metric.chronicLoad - metric.acuteLoad;
+      metric.acuteLoad = computeWindowAverage(series, index, 1, 'totalLoad');
+      metric.chronicLoad = computeWindowAverage(series, index, 4, 'totalLoad');
+      metric.form = clamp(metric.chronicLoad - metric.acuteLoad, -100, 100);
 
-      metric.acuteSwim = computeRollingAverage(loads, point.date, acuteDays, 'swimLoad');
-      metric.chronicSwim = computeRollingAverage(loads, point.date, chronicDays, 'swimLoad');
-      metric.formSwim = metric.chronicSwim - metric.acuteSwim;
+      metric.acuteSwim = computeWindowAverage(series, index, 1, 'swimLoad');
+      metric.chronicSwim = computeWindowAverage(series, index, 4, 'swimLoad');
+      metric.formSwim = clamp(metric.chronicSwim - metric.acuteSwim, -100, 100);
 
-      metric.acuteBike = computeRollingAverage(loads, point.date, acuteDays, 'bikeLoad');
-      metric.chronicBike = computeRollingAverage(loads, point.date, chronicDays, 'bikeLoad');
-      metric.formBike = metric.chronicBike - metric.acuteBike;
+      metric.acuteBike = computeWindowAverage(series, index, 1, 'bikeLoad');
+      metric.chronicBike = computeWindowAverage(series, index, 4, 'bikeLoad');
+      metric.formBike = clamp(metric.chronicBike - metric.acuteBike, -100, 100);
 
-      metric.acuteRun = computeRollingAverage(loads, point.date, acuteDays, 'runLoad');
-      metric.chronicRun = computeRollingAverage(loads, point.date, chronicDays, 'runLoad');
-      metric.formRun = metric.chronicRun - metric.acuteRun;
+      metric.acuteRun = computeWindowAverage(series, index, 1, 'runLoad');
+      metric.chronicRun = computeWindowAverage(series, index, 4, 'runLoad');
+      metric.formRun = clamp(metric.chronicRun - metric.acuteRun, -100, 100);
 
       metrics.push(metric);
     }
