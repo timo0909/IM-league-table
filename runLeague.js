@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
-// Usage: node src/runLeague.js --weekStart=YYYY-MM-DD --weekEnd=YYYY-MM-DD
-// Example: node src/runLeague.js --weekStart=2025-03-03 --weekEnd=2025-03-17
+// Usage: node runLeague.js --weekStart=YYYY-MM-DD --weekEnd=YYYY-MM-DD
+// Example: node runLeague.js --weekStart=2025-03-03 --weekEnd=2025-03-17
 
-import { Database } from './db.js';
-import { getWeekStartDate } from './trainingLoad.js';
-import { runWeeklyLeague } from './weeklyPipeline.js';
+import { Database } from './src/db.js';
+import { getWeekStartDate } from './src/trainingLoad.js';
+import { runWeeklyLeague } from './src/weeklyPipeline.js';
 
 function parseArgs(argv) {
   const args = {};
