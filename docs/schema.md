@@ -6,7 +6,7 @@ This document defines the initial SQLite schema for the Ironman League web app. 
 
 - 3 athletes compete weekly.
 - Data is ingested from Strava activities.
-- Scores tracked weekly and overall, including swim/bike/run categories.
+- Scores tracked weekly, including swim/bike/run categories.
 - AI referee provides **commentary only** (no scoring logic).
 
 ## Tables
@@ -25,7 +25,7 @@ Stores the core athlete records.
 **Relationships**
 - One athlete has many `strava_activities`.
 - One athlete has many `weekly_scores`.
-- One athlete has many `overall_scores`.
+- One athlete has many `weekly_metrics`.
 
 ---
 
@@ -43,6 +43,7 @@ Represents competition weeks. All scoring is tied to a week.
 
 **Relationships**
 - One week has many `weekly_scores`.
+- One week has many `weekly_metrics`.
 - One week has many `ai_commentary` entries.
 
 ---
@@ -55,10 +56,11 @@ Raw activity data ingested from Strava. Used for deriving weekly and overall sco
 | `id` | INTEGER | PRIMARY KEY | Surrogate key. |
 | `athlete_id` | INTEGER | NOT NULL, FK → `athletes.id` | Owner athlete. |
 | `strava_activity_id` | TEXT | UNIQUE, NOT NULL | External identifier from Strava. |
-| `activity_type` | TEXT | NOT NULL | "swim", "bike", or "run". |
+| `activity_type` | TEXT | NOT NULL, CHECK (`activity_type` IN ('swim', 'bike', 'run')) | Discipline type. |
 | `start_time` | TEXT | NOT NULL | ISO-8601 timestamp. |
 | `duration_seconds` | INTEGER | NOT NULL | Activity duration in seconds. |
 | `distance_meters` | REAL | NOT NULL | Activity distance in meters. |
+| `effort_score` | REAL | NOT NULL | Activity effort score derived from Strava data. |
 | `source_payload` | TEXT | NOT NULL | Raw JSON payload (string). |
 | `created_at` | TEXT | NOT NULL | ISO-8601 timestamp. |
 | `updated_at` | TEXT | NOT NULL | ISO-8601 timestamp. |
@@ -91,27 +93,25 @@ Weekly scoring per athlete with discipline breakdown and totals.
 
 ---
 
-### 5) `overall_scores`
-Running totals per athlete across all weeks.
+### 5) `weekly_metrics`
+Training load metrics per athlete per week.
 
 | Column | Type | Constraints | Notes |
 | --- | --- | --- | --- |
 | `id` | INTEGER | PRIMARY KEY | Surrogate key. |
+| `week_id` | INTEGER | NOT NULL, FK → `weeks.id` | Competition week. |
 | `athlete_id` | INTEGER | NOT NULL, FK → `athletes.id` | Athlete. |
-| `swim_score` | REAL | NOT NULL | Total swim score. |
-| `bike_score` | REAL | NOT NULL | Total bike score. |
-| `run_score` | REAL | NOT NULL | Total run score. |
-| `total_score` | REAL | NOT NULL | Sum of swim/bike/run. |
-| `as_of_week_id` | INTEGER | NULL, FK → `weeks.id` | Snapshot week boundary. |
+| `fatigue` | REAL | NOT NULL | Weekly fatigue metric. |
+| `fitness` | REAL | NOT NULL | Weekly fitness metric. |
+| `form` | REAL | NOT NULL | Weekly form metric. |
 | `created_at` | TEXT | NOT NULL | ISO-8601 timestamp. |
 | `updated_at` | TEXT | NOT NULL | ISO-8601 timestamp. |
 
 **Relationships**
-- One overall score belongs to one `athlete`.
-- Optionally references the `weeks` table for the snapshot boundary.
+- Many weekly metrics belong to one `week` and one `athlete`.
 
 **Uniqueness**
-- Enforce `UNIQUE (athlete_id)` for a single current overall score row.
+- Enforce `UNIQUE (week_id, athlete_id)` to keep one metrics row per athlete per week.
 
 ---
 
@@ -136,10 +136,10 @@ Stores AI referee commentary only (no scoring logic). Scoped to a week.
 
 - `athletes (1) ──< strava_activities (many)`
 - `athletes (1) ──< weekly_scores (many)`
+- `athletes (1) ──< weekly_metrics (many)`
 - `weeks (1) ──< weekly_scores (many)`
-- `athletes (1) ──< overall_scores (1)`
+- `weeks (1) ──< weekly_metrics (many)`
 - `weeks (1) ──< ai_commentary (many)`
-- `weeks (1) ──< overall_scores (0..many)` (optional snapshot references via `as_of_week_id`)
 
 ## Indexing Notes
 
@@ -147,5 +147,4 @@ Recommended indexes for query performance:
 - `strava_activities(athlete_id, start_time)`
 - `weekly_scores(week_id, total_score)`
 - `weekly_scores(athlete_id, week_id)`
-- `overall_scores(total_score)`
-
+- `weekly_metrics(week_id, athlete_id)`
