@@ -1,5 +1,9 @@
 import { fetchActivitiesPage, mapStravaTypeToDiscipline } from './stravaClient.js';
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function normalizeActivity({ athleteId, activity }) {
   const discipline = mapStravaTypeToDiscipline(activity.type);
   if (!discipline) {
@@ -33,6 +37,9 @@ export async function ingestStravaActivities({
 }) {
   let page = 1;
   let hasMore = true;
+  let fetched = 0;
+  let inserted = 0;
+  let skipped = 0;
 
   while (hasMore) {
     const activities = await fetchActivitiesPage({
@@ -43,15 +50,28 @@ export async function ingestStravaActivities({
       before,
     });
 
+    fetched += activities.length;
+
     const normalizedActivities = activities
       .map((activity) => normalizeActivity({ athleteId, activity }))
       .filter(Boolean);
 
     for (const activity of normalizedActivities) {
-      await db.insertStravaActivity(activity);
+      try {
+        await db.insertStravaActivity(activity);
+        inserted += 1;
+      } catch (err) {
+        // Assume unique constraint violation = already ingested
+        skipped += 1;
+      }
     }
 
     hasMore = activities.length === perPage;
     page += 1;
+
+    // Rate limiting safety
+    await sleep(300);
   }
+
+  return { fetched, inserted, skipped };
 }
