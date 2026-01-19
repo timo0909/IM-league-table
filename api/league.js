@@ -1,43 +1,32 @@
-import express from 'express';
 import sqlite3 from 'sqlite3';
 import { promisify } from 'node:util';
 
-// Run with: node server.js
+function openDatabase(dbPath) {
+  const db = new sqlite3.Database(dbPath);
+  return {
+    all: promisify(db.all.bind(db)),
+    get: promisify(db.get.bind(db)),
+    close: promisify(db.close.bind(db)),
+  };
+}
 
-const app = express();
-const port = 3000;
-const dbPath = process.env.DATABASE_PATH ?? 'league.sqlite';
-
-const db = new sqlite3.Database(dbPath);
-const allAsync = promisify(db.all.bind(db));
-const getAsync = promisify(db.get.bind(db));
-
-app.get('/api/weeks', async (req, res) => {
-  try {
-    const rows = await allAsync(
-      `
-      SELECT label
-      FROM weeks
-      ORDER BY week_start ASC
-      `
-    );
-
-    res.json({ weeks: rows.map((row) => row.label) });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to load weeks.' });
+export default async function handler(req, res) {
+  if (req.method !== 'GET') {
+    res.status(405).json({ error: 'Method not allowed.' });
+    return;
   }
-});
 
-app.get('/api/league', async (req, res) => {
   const weekLabel = req.query.week;
-
-  if (!weekLabel) {
+  if (!weekLabel || typeof weekLabel !== 'string') {
     res.status(400).json({ error: 'Missing week parameter.' });
     return;
   }
 
+  const dbPath = process.env.DATABASE_PATH ?? 'league.sqlite';
+  const db = openDatabase(dbPath);
+
   try {
-    const week = await getAsync(
+    const week = await db.get(
       `
       SELECT id, label
       FROM weeks
@@ -51,7 +40,7 @@ app.get('/api/league', async (req, res) => {
       return;
     }
 
-    const results = await allAsync(
+    const results = await db.all(
       `
       SELECT
         weekly_scores.athlete_id as athleteId,
@@ -68,7 +57,7 @@ app.get('/api/league', async (req, res) => {
       [week.id]
     );
 
-    const commentaryRow = await getAsync(
+    const commentaryRow = await db.get(
       `
       SELECT commentary
       FROM ai_commentary
@@ -77,22 +66,14 @@ app.get('/api/league', async (req, res) => {
       [week.id]
     );
 
-    res.json({
+    res.status(200).json({
       week: week.label,
       results,
       commentary: commentaryRow?.commentary ?? '',
     });
   } catch (error) {
     res.status(500).json({ error: 'Failed to load league data.' });
+  } finally {
+    await db.close();
   }
-});
-
-app.listen(port, () => {
-  console.info(`[server] listening on port ${port}`);
-});
-
-process.on('SIGINT', () => {
-  db.close(() => {
-    process.exit(0);
-  });
-});
+}
